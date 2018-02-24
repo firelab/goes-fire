@@ -129,15 +129,20 @@ class FireMask (object) :
 
     def test_bad_pixels(self) : 
         """Checks for bad pixels in Ch7 and Ch 14 input data, as per ATBD 3.4.2.3"""
-        bt = self.get_ch(7)
-        bad = np.logical_or(bt.quality.get_pixels_from_condition('OUT_OF_RANGE'),
-                            bt.quality.get_pixels_from_condition('NO_VALUE'))
-        self._mask_out_pixels(bad, 'MISSING_CH7')
 
+        # check channel 7
+        bt = self.get_ch(7)
+        bad = bt.quality.get_pixels_from_condition('NO_VALUE')
+        self._mask_out_pixels(bad, 'MISSING_CH7')
+        bad = bt.quality.get_pixels_from_condition('OUT_OF_RANGE')
+        self._mask_out_pixels(bad, 'SAT_CH7')
+
+        # check channel 14
         bt = self.get_ch(14)
-        bad = np.logical_or(bt.quality.get_pixels_from_condition('OUT_OF_RANGE'),
-                            bt.quality.get_pixels_from_condition('NO_VALUE'))
+        bad = bt.quality.get_pixels_from_condition('NO_VALUE')
         self._mask_out_pixels(bad, 'MISSING_CH14')
+        bad = bt.quality.get_pixels_from_condition('OUT_OF_RANGE')
+        self._mask_out_pixels(bad, 'SAT_CH14')
         
         
 

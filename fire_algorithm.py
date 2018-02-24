@@ -73,6 +73,7 @@ class FireMask (object) :
             self.test_bad_pixels()
             self.test_landcover()
             self.test_minimum_refl()
+            self.test_cloudy()
         
         return self.mask
 
@@ -96,7 +97,7 @@ class FireMask (object) :
         pixels over the earth have a value of 100"""
         bt7 = self.get_ch(7)
         shape = bt7.get_shape()
-        mask = np.empty(shape, dtype=np.byte)
+        mask = np.empty(shape, dtype=np.uint8)
 
         mask[:] = np.where(ma.getmaskarray(bt7.data[:]), FireMask.MASK_CODES["SPACE"], 
                                                          FireMask.MASK_CODES["FIRE_FREE"])
@@ -154,5 +155,44 @@ class FireMask (object) :
         """Checks the reflectance product is greater than zero"""
         refl = self.get_refl_product()
         self._mask_out_pixels(refl<0, 'NEG_REFL')
-                                                
+
+    def test_cloudy(self) : 
+        """Applies various tests to flag clouds. ATBD 3.4.2.3. Uses thresholds
+           defined for "MODIS Proxy" data."""
+
+        bt7 = self.get_ch(7)
+        bt14 = self.get_ch(14)
         
+        self._mask_out_pixels(bt14.data[:] < 270, 'CLOUD_CH14')
+        diff = (bt7.data[:] - bt14.data[:])
+        self._mask_out_pixels(diff < -4, 'CLOUD_BT_DIFF')
+
+        test_diff = diff > 20
+        test_abs = np.logical_or( (bt7.data[:] < 285), (bt14.data[:] < 280))
+        self._mask_out_pixels(np.logical_and(test_diff,test_abs), 'CLOUD')
+        del test_diff
+        del test_abs
+
+        # NOTE: The tests described for channel two in ATBD 3.4.2.3 must be 
+        # wrong, or at least ill-considered. The problem is in the description of
+        # the criteria for a daytime pixel. I am simplifying this to sza < 70
+        try: 
+            refl2 = self.get_ch(2)
+            sva = self.cmi_scene.geo.get_solar_angles()
+            daytime = sva.calc_daytime_flag(70)
+            self._mask_out_pixels(np.logical_and(daytime,refl2.data[:]>0.28), 'CLOUD_CH2')
+            del daytime
+        except KeyError : 
+            pass
+
+        try : 
+            bt15 = self.get_ch(15)
+            self._mask_out_pixels(bt15.data[:] < 265, 'CLOUD_CH15')
+
+            test_bt14 = bt14.data[:] < 270
+            tdiff = bt14.data[:] - bt15.data[:]
+            self._mask_out_pixels(np.logical_and(test_bt14, tdiff < 4), 'CLOUD_WARM')
+            self._mask_out_pixels(np.logical_and(test_bt14, tdiff > 60), 'CLOUD_COLD')
+        except KeyError : 
+            pass
+     

@@ -287,11 +287,10 @@ class SolarAngles(object) :
         return np.logical_or(self.solar_zenith.mask, 
                              glint_angle < threshold)
 
-    def get_daytime_flag(self) : 
-        if self.daytime_flag is None : 
-            self.daytime_flag = np.logical_and(self.solar_zenith > 0,
-                                               self.solar_zenith < 85)
-        return self.daytime_flag
+    def calc_daytime_flag(self,threshold=85) : 
+        daytime_flag = np.logical_and(self.solar_zenith > 0,
+                                      self.solar_zenith < threshold)
+        return daytime_flag
 
 
 class LocalAngles(object) : 

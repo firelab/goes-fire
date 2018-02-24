@@ -1,4 +1,4 @@
-"zeniti""Utilities to manipulate data"""
+"""Utilities to manipulate data"""
 import goes_projection as gp
 import numpy.ma as ma
 import numpy as np
@@ -27,17 +27,29 @@ class ABIData (object) :
         self.y    = y
         self.t    = t
 
-        self._pc = None 
+        self.centers = None
         self._sza = None
 
-    def get_pixel_centers(self) : 
-        if self._pc is None :
-            self._pc = gp.PixelCenters(self.x, self.y, self.proj) 
-        return self._pc
+    @property
+    def centers(self) : 
+        if self.__centers is None :
+            self.centers = gp.PixelCenters(self.x, self.y, self.proj) 
+        return self.__centers
+
+    @centers.setter
+    def centers(self, centers) : 
+        """When we're assigning a "pixel centers" object, make sure the projection, 
+           x and y  arrays match our scene data."""
+        if centers is None : 
+           self.__centers = None
+        elif ((self.proj == centers.projection) and 
+           np.all( self.x == centers.x ) and 
+           np.all( self.y == centers.y )) : 
+           self.__centers = centers
 
     def get_solar_angles(self) : 
         if self._sza is None : 
-            pc = self.get_pixel_centers()
+            pc = self.centers
             self._sza = gp.SolarAngles(pc, self.t)
         return self._sza
 
@@ -60,9 +72,20 @@ class ABIData (object) :
 
         
         
+class Feature(object) : 
+    """Gridded data which represent either a measurement or a 
+    derived product."""
 
+    def __init__(self, data, id, min=None, max=None, mean=None, stdev=None, outlier_count=None) : 
+        self.data = data
+        self.id = id
+        self.min = min
+        self.max = max
+        self.mean = mean
+        self.stdev = stdev
+        self.outlier_count = outlier_count
 
-class DetectorBand(object) : 
+class DetectorBand(Feature) : 
     """A band of data associated with one of the detectors on
     an instrument. The data will have a center wavelength associated
     with the detector.  It may also have a spectral response function.
@@ -75,21 +98,28 @@ class DetectorBand(object) :
     Data arrays are represented as netCDF4 variables."""
 
     def __init__(self, data, wavelength, id, min=None, max=None, mean=None, stdev=None, outlier_count=None) : 
-        self.data = data
+        super(DetectorBand,self).__init__(data, id, min, max, mean, stdev, outlier_count) 
         self.wavelength = wavelength
-        self.id = id
-        self.min = min
-        self.max = max
-        self.mean = mean
-        self.stdev = stdev
-        self.outlier_count = outlier_count
 
 class CMIBandQuality(object) : 
     """Contains the band quality information for the Cloud and Moisture Imagery,
     and the ability to generate masks based on data quality."""
 
+    CODES = {
+        'GOOD'                 : np.uint8(0),
+        'CONDITIONALLY_USABLE' : np.uint8(1),
+        'OUT_OF_RANGE'         : np.uint8(2),
+        'NO_VALUE'             : np.uint8(3)
+    }
+
     def __init__(self, ds, channel) : 
         self.data = ds.variables['DQF_C{:02d}'.format(channel)]
+
+    def get_pixels_from_condition(self, code_text) : 
+        """User specifies one of the condition codes by text, 
+        function returns a boolean array of locations where 
+        the pixel is flagged with that condition."""
+        return (self.data[:] == CMIBandQuality.CODES[code_text])
 
 class CMIBand (DetectorBand) : 
     """Cloud and Moisture Imagery is essentially scaled radiance. 
@@ -131,6 +161,9 @@ class CMIBand (DetectorBand) :
         self.mean = self.ds.variables['mean_reflectance_factor_C{:02d}'.format(self.channel)]
         self.stdev = self.ds.variables['std_dev_reflectance_factor_C{:02d}'.format(self.channel)]
 
+    def get_shape(self) : 
+        return self.data.shape
+
 class ABIScene(object) : 
     """Combines the geospatial information for the scene with one or more bands of data.
     The bands are stored in a dictionary which is keyed by the channel number. One of the 
@@ -142,8 +175,12 @@ class ABIScene(object) :
 class CMIScene(ABIScene) : 
 
     @classmethod
-    def read_dataset(cls, ds, channels) : 
+    def read_dataset(cls, ds, channels, pc=None) : 
         geo = ABIData.read_L2_dataset(ds)
+
+        if pc is not None : 
+            geo.centers = pc
+
         channel_dict = {}
         for ch in channels : 
             channel_dict[ch] = CMIBand(ds, ch)
@@ -151,6 +188,11 @@ class CMIScene(ABIScene) :
         return cls(geo, channel_dict)
 
     @classmethod
-    def read_ncfile(cls, fname, channels) : 
+    def read_ncfile(cls, fname, channels, pc=None) : 
         ds = nc.Dataset(fname)
-        return cls.read_dataset(ds, channels)
+        return cls.read_dataset(ds, channels, pc)
+
+class FireScene (ABIScene) : 
+    """A GOES-R fire product primarily consists of mask, temperature,
+       area, and radiative power arrays."""
+    pass

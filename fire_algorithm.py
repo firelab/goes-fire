@@ -7,6 +7,52 @@ def print_mask_summary(mask) :
     totals = {} 
     for k,v in FireMask.MASK_CODES.items() : 
         print("{} : {}".format(k, np.count_nonzero(mask == v)))
+
+class ReflectivityProduct(object) : 
+    def __init__(self, bt7, bt14, aux7) : 
+        """Calculate the "reflectivity product", which is defined
+           as the radiance difference of band 7 - band 14 in band 7 
+           space. (GOES-R Fire ATBD section 3.4.2.2)"""
+        self.refl = aux7.calc_L_from_bt(bt7.data[:]) - aux7.calc_L_from_bt(bt14.data[:])
+        self.refl_minus3 = None
+        self.refl_plus3 = None
+
+    def _minus(self, numpix) : 
+        """Current pixel minus the value "numpix" to the left"""
+        return self.refl[:,numpix:] - self.refl[:,:-numpix] 
+
+
+    @property
+    def refl_minus3(self) : 
+        """Current pixel minus the value three to the left"""
+        if self.__rm3 is None : 
+           minus3 = self._minus(3)
+           final = ma.empty( self.refl.shape, dtype=self.refl.dtype)
+           final[:,3:] = minus3
+           final[:,:3] = ma.masked
+           self.refl_minus3 = final
+           
+        return self.__rm3
+
+    @refl_minus3.setter
+    def refl_minus3(self, r) : 
+        self.__rm3 = r
+
+    @property
+    def refl_plus3(self) : 
+        """Current pixel minus the value three to the right"""
+        if self.__rp3 is None : 
+           plus3 = - self.refl_minus3[:,3:]
+           final = ma.empty( self.refl.shape, dtype=self.refl.dtype)
+           final[:,:-3] = plus3
+           final[:,-3:] = ma.masked
+           self.refl_plus3 = final
+        return self.__rp3
+
+    @refl_plus3.setter
+    def refl_plus3(self, r): 
+        self.__rp3 = r
+    
     
 class FireMask (object) : 
 
@@ -32,7 +78,9 @@ class FireMask (object) :
         "CLOUD_CH2"     : 215,
         "CLOUD_CH15"    : 220,
         "CLOUD_WARM"    : 225,
-        "CLOUD_COLD"    : 230
+        "CLOUD_COLD"    : 230,
+        "CLOUD_REFL7"   : 240, 
+        "CLOUD_REFL2"   : 245
     } 
 
 
@@ -40,9 +88,9 @@ class FireMask (object) :
         self.lva = lva
         self.cmi_scene = cmi_scene
         self.goes_aux  = goes_aux
-        self.refl = None
         self.mask = None
         self.minfire = None
+        self.__refl = None
 
 
     def get_ch(self, ch) : 
@@ -50,21 +98,17 @@ class FireMask (object) :
 
     def get_aux(self, ch) : 
         return self.goes_aux[ch-1]
-    
-    def calc_refl_product(self) : 
-        """Calculate the "reflectivity product", which is defined
-           as the radiance difference of band 7 - band 14 in band 7 
-           space. (GOES-R Fire ATBD section 3.4.2.2)"""
-        aux7 = self.get_aux(7)
-        bt7  = self.get_ch(7)
-        bt14 = self.get_ch(14)
-        self.refl = aux7.calc_L_from_bt(bt7.data[:]) - aux7.calc_L_from_bt(bt14.data[:])
 
-    def get_refl_product(self) : 
-        if self.refl is None : 
-            self.calc_refl_product()
-        return self.refl
+    @property
+    def refl(self) : 
+        if self.__refl is None : 
+            bt7 = self.get_ch(7)
+            bt14 = self.get_ch(14)
+            aux7 = self.get_aux(7)
+            self.__refl = ReflectivityProduct(bt7, bt14, aux7)
+        return self.__refl
     
+
     def get_mask(self) : 
         if self.mask is None : 
             self.init_mask()
@@ -74,6 +118,7 @@ class FireMask (object) :
             self.test_landcover()
             self.test_minimum_refl()
             self.test_cloudy()
+            self.test_along_scan()
         
         return self.mask
 
@@ -89,6 +134,19 @@ class FireMask (object) :
         self.mask[:] = np.where(np.logical_and(self.mask == FireMask.MASK_CODES["FIRE_FREE"],
                                                condition),
                                 FireMask.MASK_CODES[value], self.mask)
+
+    def _calc_temp_threshold(self, night, dayscale) : 
+        sva = self.cmi_scene.geo.get_solar_angles()
+        daytime = sva.calc_daytime_flag()
+        return np.where(daytime, night+dayscale*np.cos(sva.solar_zenith), night)
+        
+    @property
+    def t39min(self) : 
+        return self._calc_temp_threshold(285,15)
+
+    @property
+    def t39_refl(self) : 
+        return self._calc_temp_threshold(315,5)
 
     def init_mask(self) : 
         """The fire mask is an 8-bit integer which contains the results
@@ -153,8 +211,7 @@ class FireMask (object) :
 
     def test_minimum_refl(self) : 
         """Checks the reflectance product is greater than zero"""
-        refl = self.get_refl_product()
-        self._mask_out_pixels(refl<0, 'NEG_REFL')
+        self._mask_out_pixels(self.refl.refl<0, 'NEG_REFL')
 
     def test_cloudy(self) : 
         """Applies various tests to flag clouds. ATBD 3.4.2.3. Uses thresholds
@@ -196,3 +253,26 @@ class FireMask (object) :
         except KeyError : 
             pass
      
+    def test_along_scan(self) : 
+        """Implements along scan reflectivity test in ATBD 3.4.2.4"""
+        bt7 = self.get_ch(7)
+        refl_test = np.logical_or(self.refl.refl_minus3 < 0.2,
+                                  self.refl.refl_plus3 < 0.2)
+        test320 = bt7.data[:] < 320
+        test = np.logical_and(
+                 np.logical_and(test320, bt7.data[:] < self.t39min),
+                 np.logical_and(bt7.data[:] > 150, refl_test))
+        self._mask_out_pixels(test, 'CLOUD_REFL7')
+
+        try :
+            refl2 = self.get_ch(2)
+            sva = self.cmi_scene.geo.get_solar_angles()
+
+            # using same definition of daytime as above.
+            daytime = sva.calc_daytime_flag(70)
+            test = np.logical_and(np.logical_and(test320, refl2.data[:] > 0.28),
+                                  np.logical_and(daytime,refl_test))
+            self._mask_out_pixels(test, 'CLOUD_REFL2')
+
+        except KeyError :
+            pass

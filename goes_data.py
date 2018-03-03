@@ -282,23 +282,17 @@ class ABISceneInventory (object) :
         self._get_times()
 
     def _get_times(self, nearest = None) : 
-        start_times = [None] * len(self.files)
-        end_times = [None] * len(self.files)
-        proc_times = [None] * len(self.files)
-        indices = [None] * len(self.files)
-        for i in range(len(self.files)) : 
-            fields = self.files[i].split('_') 
+        bn = [ os.path.basename(f) for f in self.files]
+        fields = [ s.split('_') for s in bn]
+        start_times = [ SceneDate.parse(f[3]) for f in fields ]
+        end_times   = [ SceneDate.parse(f[4]) for f in fields ]
 
-            start_times[i] = SceneDate.parse(fields[3])
-            end_times[i]   = SceneDate.parse(fields[4])
+        # last field has the ".nc" at the end which we need to
+        # get rid of.
+        pfields = [ f[5].split('.') for f in fields ] 
+        proc_times = [ SceneDate.parse(p[0]) for p in pfields ]
 
-            # last field has the ".nc" at the end which we need to
-            # get rid of.
-            pfields = fields[5].split('.')
-            proc_times[i]  = SceneDate.parse(pfields[0])
-
-            # getting the indices
-            indices[i] = start_times[i].index
+        indices = [ t.index for t in start_times ]
 
         i = pd.MultiIndex.from_tuples(indices, names=['year','doy','time'])
         self.inventory = pd.DataFrame({"Filename" : self.files,

@@ -5,6 +5,10 @@ import numpy as np
 import netCDF4 as nc
 import astropy.units as u
 import astropy.time as at
+import pandas as pd
+import glob
+import os.path
+from datetime import datetime
 
 class ABIData (object) : 
     """ABI Data are data collected from a geostationary platform. 
@@ -196,3 +200,109 @@ class FireScene (ABIScene) :
     """A GOES-R fire product primarily consists of mask, temperature,
        area, and radiative power arrays."""
     pass
+
+class SceneDate(object) : 
+    """can parse or format a timestamp found in various locations
+       in the filename."""
+    FORMAT_STR = '%Y%j%H%M%S'
+
+    def __init__(self) : 
+        self.__index = None
+
+    @classmethod
+    def parse(cls, string) : 
+        """given a string, which is expected to be the entire field
+        in the filename which encodes one of the three important times
+        (observation start, observation end, processing), this method 
+        produces a scenedate object."""
+
+        scene = cls()
+        time = datetime.strptime(string[1:-1], cls.FORMAT_STR)
+        scene.code = string[0]
+        tenths = int(string[-1])
+        microsecond = 100000 * tenths
+        scene.time = datetime(time.year, time.month, time.day,
+                             time.hour, time.minute, time.second,
+                             microsecond)
+
+        return scene
+
+    @classmethod
+    def from_obj(cls, obj, code=None) : 
+        """creates a scenedate object from a datetime and a type code"""
+        scene = cls()
+        scene.time = obj
+        scene.code = code
+        return scene
+
+    def format(self) : 
+        """returns a string which could be placed in the filename"""
+        # integer division should result in single digit 0-9
+        tenths = self.time.microsecond / 100000
+        code = 'u'
+        if self.code is not None : 
+            code = self.code
+        return code + self.time.strftime(self.FORMAT_STR) + str(tenths)
+
+    @property
+    def clocktime(self) : 
+        """returns an integer representing the 24 hour clock time
+        (hours and minutes)."""
+        return self.time.hour*100 + self.time.minute
+
+    @property
+    def index(self) : 
+        """Returns a tuple of fields which can be used as an index:
+        (year, doy, 24-time) where each item is an integer."""
+        if self.__index is None : 
+            rt = self.rounded_clocktime()
+            doy = int(self.time.strftime('%j'))
+            self.__index = (self.time.year, doy, rt)
+        return self.__index
+        
+
+    def rounded_clocktime(self, nearest=5) : 
+        """returns an integer representing the 24 hour clock time
+        rounded to "nearest" minutes"""
+        mins = int(nearest * np.round(self.time.minute/float(nearest)))
+        hours = self.time.hour
+        if mins >= 60 : 
+            mins =0
+            hours = hours + 1
+        return hours*100 + mins
+        
+class ABISceneInventory (object) : 
+    """Given a directory, scans for all the files matching a particular
+    pattern. The raw list of filenames is presented as the files attribute,
+    and a dataframe of filename, start, stop and end times is presented
+    as the inventory attribute."""
+    def __init__(self, dirname) : 
+        self.dirname = dirname
+        self.files = glob.glob(os.path.join(dirname,'OR_ABI*.nc'))
+        self._get_times()
+
+    def _get_times(self, nearest = None) : 
+        start_times = [None] * len(self.files)
+        end_times = [None] * len(self.files)
+        proc_times = [None] * len(self.files)
+        indices = [None] * len(self.files)
+        for i in range(len(self.files)) : 
+            fields = self.files[i].split('_') 
+
+            start_times[i] = SceneDate.parse(fields[3])
+            end_times[i]   = SceneDate.parse(fields[4])
+
+            # last field has the ".nc" at the end which we need to
+            # get rid of.
+            pfields = fields[5].split('.')
+            proc_times[i]  = SceneDate.parse(pfields[0])
+
+            # getting the indices
+            indices[i] = start_times[i].index
+
+        i = pd.MultiIndex.from_tuples(indices, names=['year','doy','time'])
+        self.inventory = pd.DataFrame({"Filename" : self.files,
+                                       "start"    : start_times,
+                                       "end"      : end_times,
+                                       "proc"     : proc_times}, index=i)
+

@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
+import os.path
+import glob
 import pyproj
+from datetime import datetime
 
 def round_times(times) : 
     return rt
@@ -59,3 +62,43 @@ class HMS (object) :
         using the Rounded observation time column, but allows the caller
         to specify a different column."""
         return self.hms.groupby( [time_col, 'i_x', 'i_y'])['Satellite'].count()
+
+class HMSDate(object) : 
+    """class to transition back and forth between the date of the HMS 
+    observation file and the filename"""
+
+    def __init__(self) : 
+        self.__index = None
+
+    @classmethod
+    def parse(cls, string) : 
+        hms = cls()
+        bn = os.path.basename(string)
+        datestring = bn[3:11]
+        hms.time = datetime.strptime(datestring, '%Y%m%d').date()
+        return hms
+        
+
+    def format(self) : 
+        return self.time.strftime('hms%Y%m%d.txt')
+
+    @property
+    def index(self) : 
+        """returns a (year, doy) tuple for use as an index"""
+        if self.__index is None : 
+            doy = int(self.time.strftime('%j'))
+            self.__index = (self.time.year, doy)
+
+        return self.__index
+        
+
+class HMSInventory (object) : 
+    """scans a directory for hazard mapping system files and 
+    retains a list"""
+    def __init__(self, directory) : 
+        self.files = glob.glob(os.path.join(directory, 'hms*.txt'))
+        hms_times = [ HMSDate.parse(d) for d in self.files ]
+        i_tuple = [i.index for i in hms_times ]
+        idx = pd.MultiIndex.from_tuples(i_tuple, names=['year','doy'])
+        self.inventory = pd.Series(self.files, index=idx)
+

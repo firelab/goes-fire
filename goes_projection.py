@@ -94,6 +94,13 @@ class Projection(object) :
         container.longitude_of_projection_origin = self.longitude_of_projection_origin
         container.sweep_angle_axis               = self.sweep_angle_axis
 
+    def to_radians(self, ground_x, ground_y, ground_proj) : 
+        """Converts ground (x,y) points in a specified ground projection
+           to radians from nadir."""
+        m_x, m_y = pyproj.transform(ground_proj, self.get_proj4_obj(), ground_x, ground_y)
+        rad_x = m_x / self.perspective_point_height
+        rad_y = m_y / self.perspective_point_height
+        return rad_x, rad_y
 
     def write_ncfile(self, fname) :
         ds = nc.Dataset(fname, "w") 
@@ -374,3 +381,25 @@ class LocalAngles(object) :
         ds = nc.Dataset(fname)
         return cls.read_dataset(ds)
 
+
+    def to_image(self, ground_x, ground_y, ground_proj) : 
+        """Converts ground (x,y) points in a ground projection to 
+          image coordinates"""
+        rad_x, rad_y = self.centers.projection.to_radians(ground_x, ground_y, ground_proj)
+        x_min = np.min(self.centers.x)
+        x_max = np.max(self.centers.x)
+        y_min = np.min(self.centers.y)
+        y_max = np.max(self.centers.y)
+        outside_2d_mask = np.logical_or(
+                              np.logical_or(rad_x<x_min, rad_x>x_max),
+                              np.logical_or(rad_y<y_min, rad_y>y_max)
+                          )
+        i_x = ma.masked_all( (len(rad_x),), dtype=np.int)
+        i_y = ma.masked_all( (len(rad_y),), dtype=np.int)
+        for i in range(len(rad_x)) : 
+            if not outside_2d_mask[i] : 
+                i_x[i] = np.argmax(self.centers.x > rad_x[i])
+                i_y[i] = np.argmax(self.centers.y < rad_y[i])
+
+        return i_x, i_y
+            

@@ -17,6 +17,9 @@ import mythreads as mt
 import hms
 
 
+# 
+# Code which supports multithreaded operation
+#
 def scene_worker() : 
     """worker process to load and process a scene"""
     while True : 
@@ -26,7 +29,7 @@ def scene_worker() :
 
         idx = f[0]
         args = f[1:]
-        scene_pts = TrainingVector.from_scene(*args)
+        scene_pts = GOESVector.from_scene(*args)
         work_mgr.product.put( (idx, scene_pts) )
 
 def scene_collector(result) : 
@@ -37,8 +40,10 @@ def scene_collector(result) :
 
 work_mgr = None
 
-class TrainingVector (object) : 
-    """A single training vector is the combination of data from the 
+
+
+class GOESVector (object) : 
+    """A single goes vector is the combination of data from the 
     same window in four bands of CMI data plus a day/night flag. The
     four bands are the ones used in the official WF-ABBA algorithm: 
     2, 7, 14, 15. 
@@ -62,6 +67,12 @@ class TrainingVector (object) :
 
     @classmethod
     def from_window(cls, scene, center, output, edge=7) : 
+        """Constructs a single GOESVector from the bands
+        in the given scene. The extract from each band is 
+        a window centered on the pixel specified by "center",
+        having a length of "edge" pixels along each side.
+        Output is a flag which indicates whether there is a 
+        fire in the window or not."""
         windows = [gd.BandWindow(scene.channels[b].data,center,edge) 
                      for b in cls.CHANNELS]
 
@@ -83,6 +94,10 @@ class TrainingVector (object) :
         
     @classmethod
     def from_scene(cls, fname, scene_obs) : 
+        """Given the filename of a GOES CMI scene and a collection
+        of hms fire observations concurrent with the scene, extracts a 
+        GOESVector centered on each hms observation. This is useful for 
+        collecting training data."""
         scene = gd.CMIScene.read_ncfile(fname, cls.CHANNELS)
         scene_pts = [ ]
         for i in scene_obs.index : 
@@ -92,6 +107,10 @@ class TrainingVector (object) :
 
     @classmethod
     def from_hms(cls, cmi_dir, hms_dir,lva_file) : 
+        """Given a directory of CMI images, another directory
+        of HMS text files, and a "local viewing angle" file for 
+        the satellite slot, this code finds the common observation
+        times and extracts training data around each known fire."""
         hms_inv = hms.HMSInventory(hms_dir)
         cmi_inv = gd.ABISceneInventory(cmi_dir)
         lva     = gp.LocalAngles.read_ncfile(lva_file)
@@ -133,7 +152,7 @@ class TrainingVector (object) :
 
     @classmethod
     def read_dataset(cls, ds) : 
-        """Returns an array of TrainingVectors from the supplied 
+        """Returns an array of GOESVectors from the supplied 
         netcdf dataset, already opened."""
         vectors = ds.variables['vectors'][:]
         outputs = ds.variables['outputs'][:]

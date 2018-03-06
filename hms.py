@@ -61,7 +61,7 @@ class HMS (object) :
         of observations per GOES pixel and observation time. Defaults to
         using the Rounded observation time column, but allows the caller
         to specify a different column."""
-        return self.hms.groupby( [time_col, 'i_x', 'i_y'])['Satellite'].count()
+        return self.hms.groupby( [time_col, 'i_y', 'i_x'])['Satellite'].count()
 
 class HMSDate(object) : 
     """class to transition back and forth between the date of the HMS 
@@ -101,4 +101,5 @@ class HMSInventory (object) :
         i_tuple = [i.index for i in hms_times ]
         idx = pd.MultiIndex.from_tuples(i_tuple, names=['year','doy'])
         self.inventory = pd.Series(self.files, index=idx)
+
 

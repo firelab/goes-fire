@@ -300,3 +300,55 @@ class ABISceneInventory (object) :
                                        "end"      : end_times,
                                        "proc"     : proc_times}, index=i)
 
+
+class BandWindow(object) : 
+    """Square window of data of a specified size around a center pixel."""
+    def __init__(self, band, center, edge=7) : 
+        """extracts a window of data from the band. The window is centered
+        on the scene index specified in "center". bands are assumed to have 
+        a (y,x) indexing scheme because that's how they're stored in the netcdf
+        file. The size of the square window is specified by the "size" parameter
+        which has a default value of '7' (seven pixels on a side.)
+   
+        If the window would extend past the edge of the band's data, it is 
+        kept the same size, but moved such that it completely overlaps the 
+        scene."""
+        if (edge > band.shape[0]) or (edge > band.shape[1]) :
+            raise ValueError('Window is bigger than scene!')
+
+        # compute bounds of window
+        self.edge = edge
+        half = int(edge // 2)
+        y_slice = slice(center[0]-half, center[0]+half+1)
+        x_slice = slice(center[1]-half, center[1]+half+1)
+
+        # check window not out of bounds and move if necessary
+        band_dims = band.shape
+        y_slice = self._check_window(band_dims[0], y_slice)
+        x_slice = self._check_window(band_dims[1], x_slice)
+
+        # get the data
+        self.data = band[y_slice, x_slice]
+        
+        
+    def _check_window(self, max, window) : 
+        """checks the 1d slice specification against the extent of data and 
+        adjusts if necessary. Returns the result (most often the unmodified
+        slice)."""
+        newslice = window
+        if window.start < 0 : 
+            newslice = slice(None, self.edge) 
+        elif window.stop > max :
+            newslice = slice(-self.edge, None)
+
+        return newslice
+     
+    @property
+    def data_vector(self) : 
+        """return a 1d vector of all the data in the window"""
+        return self.data.flatten()
+
+    @property
+    def size(self) : 
+        """How many elements in the window or in the data_vector?"""
+        return self.edge * self.edge

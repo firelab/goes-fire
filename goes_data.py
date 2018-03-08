@@ -22,7 +22,7 @@ class ABIData (object) :
     This class is mainly concerned with geolocating pixels in a 
     scene. 
     """
-    def __init__(self, x, y, proj, t, scene="CONUS", platform="G16") : 
+    def __init__(self, x, y, proj, t, scene="CONUS", platform="G16", start=None, end=None) : 
 
         self.scene = scene
         self.platform = platform
@@ -30,6 +30,8 @@ class ABIData (object) :
         self.x    = x
         self.y    = y
         self.t    = t
+        self.t_start = start
+        self.t_end   = end
 
         self.centers = None
         self._sza = None
@@ -67,7 +69,10 @@ class ABIData (object) :
         proj = gp.Projection.read_dataset(ds)
         j2000 = at.Time('2000-01-01T12:00:00Z', format='isot', scale='utc')
         t = j2000 + ds.variables['t'][:] * u.s
-        return cls(x, y, proj, t, scene, platform)
+        bounds = ds.variables['time_bounds'][:] * u.s
+        start_time = j2000 + bounds[0] 
+        end_time   = j2000 + bounds[1]
+        return cls(x, y, proj, t, scene, platform, start_time, end_time)
 
     @classmethod
     def read_L2_ncfile(cls, fname) : 
@@ -234,6 +239,13 @@ class SceneDate(object) :
         scene.time = obj
         scene.code = code
         return scene
+
+    @classmethod
+    def from_astropy(cls, obj, code=None) : 
+        """creates a scenedate object from an astropy time object and 
+        a type code. """ 
+        dt_obj = obj.datetime
+        return cls.from_obj(dt_obj, code)
 
     def format(self) : 
         """returns a string which could be placed in the filename"""

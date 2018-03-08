@@ -10,10 +10,13 @@ subsequently read back in).
 import goes_data as gd
 import goes_projection as gp
 import numpy as np
+import numpy.random as nr
 import netCDF4 as nc
 import astropy.time as at
 import astropy.units as u
 import mythreads as mt
+import pandas as pd
+import imageio
 import hms
 
 
@@ -41,6 +44,9 @@ def scene_collector(result) :
 work_mgr = None
 
 
+class Dummy(object): 
+    """I just need to have something to hang an attribute on"""
+    pass
 
 class GOESVector (object) : 
     """A single goes vector is the combination of data from the 
@@ -53,6 +59,7 @@ class GOESVector (object) :
     """
 
     CHANNELS = (2, 7, 14, 15)
+    BAD_LANDCOVER = (0,11,13,15)
     j2000 = at.Time('2000-01-01T12:00:00Z', format='isot', scale='utc')
 
     def __init__(self, vector, output, center, timestamp) : 
@@ -88,12 +95,12 @@ class GOESVector (object) :
         daynight =sva.calc_daytime_flag()[center]  
         vector = np.concatenate( (vector, np.array( (daynight, )) ))
 
-        t = scene.geo.t
+        t = scene.geo.t_start
 
         return cls( vector, output, center, t ) 
         
     @classmethod
-    def from_scene(cls, fname, scene_obs) : 
+    def from_scene(cls, fname, scene_obs, output) : 
         """Given the filename of a GOES CMI scene and a collection
         of hms fire observations concurrent with the scene, extracts a 
         GOESVector centered on each hms observation. This is useful for 
@@ -101,7 +108,7 @@ class GOESVector (object) :
         scene = gd.CMIScene.read_ncfile(fname, cls.CHANNELS)
         scene_pts = [ ]
         for i in scene_obs.index : 
-            scene_pts.append(cls.from_window(scene, i, True))
+            scene_pts.append(cls.from_window(scene, i, output))
         return scene_pts
         
 
@@ -139,7 +146,8 @@ class GOESVector (object) :
 
                 # load up the work queue
                 for t in hms_obj.index.levels[0] : 
-                    work_mgr.work.put( ((y,d,t), cur_cmi.loc[d,t]['Filename'], hms_obj.loc[t]) )
+                    work_mgr.work.put( ((y,d,t), cur_cmi.loc[d,t]['Filename'], 
+                                         hms_obj.loc[t], True) )
 
         # clear out the work queue
         work_mgr.collect()
@@ -149,7 +157,94 @@ class GOESVector (object) :
 
         return pts
             
+    @classmethod 
+    def nonfire(cls, fire_pt_file, cmi_dir, lc_file) : 
+        """Reads in the fire point training file in order to pick
+        non-fire points. Eliminates any pixel containing fire in any of the 
+        scenes contributing to the training set. Also eliminates "bad" 
+        landcovers types: 
 
+          0 : Water
+         11 : 
+         13 : 
+         15 : 
+        """
+        # read in the input datasets
+        cmi_inv = gd.ABISceneInventory(cmi_dir)
+        fires   = cls.read_ncfile(fire_pt_file)
+        lc      = imageio.imread(lc_file)
+
+        # extract indices of all the fire pixels
+        i_fire  = [ np.array( [f.center[0] for f in fires]),
+                    np.array( [f.center[1] for f in fires]) ] 
+       
+        #initialize the fire mask
+        mask    = np.zeros(lc.shape, dtype=np.bool) 
+        mask[i_fire] = True
+
+        # now filter out all pixels we're not going to allow
+        # to burn
+        for lc_code in cls.BAD_LANDCOVER :
+            mask = np.where(lc == lc_code, 1, mask)
+        
+        # now randomly pick some non-fire pixels.
+        i_candidates = np.where(mask==0)
+        nonfire = nr.randint(0, len(i_candidates[0]), size=(len(fires),))
+        i_nonfire = [ i_candidates[0][nonfire],
+                      i_candidates[1][nonfire] ]
+
+
+        # and randomly pick the scenes from which the pixels
+        # are drawn 
+        unique_scenes = set( [ f.timestamp.datetime for f in fires ] )
+        unique_scenes = list( unique_scenes ) 
+        scenes = nr.randint(0, len(unique_scenes), size=(len(fires),))
+        scene_timestamps = [ unique_scenes[i] for i in scenes ] 
+
+        # compose a dataframe representing the non-fire scenes/pixels
+        centers =[ c for c in zip( i_nonfire[0], i_nonfire[1] ) ]
+        fnames = [] 
+        indices = []
+        for i in range(len(fires)) : 
+            cur_scene_date = gd.SceneDate.from_obj(scene_timestamps[i])
+            indices.append(cur_scene_date.index )
+    
+            cur_fname = cmi_inv.inventory.loc[cur_scene_date.index]['Filename']
+            if type(cur_fname) is not str : 
+                cur_fname = cur_fname[0]
+            fnames.append( cur_fname ) 
+        i_df = pd.MultiIndex.from_tuples(indices, names=['Year', 'doy', 'time'])
+        df = pd.DataFrame( {'Filename':fnames, 'Center':centers}, index=i_df)
+        df = df.sort_index()
+      
+        # set up the workers
+        global work_mgr
+        work_mgr = mt.ThreadManager(scene_worker, collector=scene_collector)
+        work_mgr.start()
+
+
+        # load up the queue
+        unique_i_df = set( [ i for i in i_df ] ) 
+        sum = 0
+        for y,d,t in unique_i_df : 
+            cur_scene = df.loc[y,d,t]
+            scene_pix = Dummy()
+            scene_pix.index = cur_scene['Center'].tolist()
+            sum = sum + len(scene_pix.index)
+            fname = cur_scene['Filename'].iloc[0]
+            work_mgr.work.put( ((y,d,t), fname, scene_pix, False) )
+
+        print(sum)
+        
+        # clear out the work queue
+        work_mgr.collect()
+        pts = work_mgr.collected_products
+        work_mgr.kill()
+        work_mgr = None
+
+        return pts                           
+        
+            
     @classmethod
     def read_dataset(cls, ds) : 
         """Returns an array of GOESVectors from the supplied 
@@ -185,7 +280,7 @@ class GOESVector (object) :
         ctr_y   = ds.createVariable('center_y', np.int,  ('num_vectors',))
         t       = ds.createVariable('t', np.float, ('num_vectors',))
 
-        t.long_name = 'time of ground truth observation'
+        t.long_name = 'start time of satellite observation'
         t.units = "seconds since J2000 epoch" 
 
         ctr_x.units = 'x pixel coordinate'

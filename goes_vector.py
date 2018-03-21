@@ -48,6 +48,10 @@ class Dummy(object):
     """I just need to have something to hang an attribute on"""
     pass
 
+def normalize(v, limits) :
+    return (v - limits[0]) / (limits[1] - limits[0])
+    
+
 class GOESVector (object) : 
     """A single goes vector is the combination of data from the 
     same window in four bands of CMI data plus a day/night flag. The
@@ -58,7 +62,13 @@ class GOESVector (object) :
     is stored separately.
     """
 
+    # valid ranges for data taken from the GOES PUG L2+ vol 5,
+    # table 5.1.6.4-1
     CHANNELS = (2, 7, 14, 15)
+    VALID_RANGES = ( (0.,1.),          # ch 2
+                     (197.31, 411.86), # ch 7
+                     (96.19, 341.28),  # ch 14
+                     (97.38, 341.28))  # ch 15
     BAD_LANDCOVER = (0,11,13,15)
     j2000 = at.Time('2000-01-01T12:00:00Z', format='isot', scale='utc')
 
@@ -71,6 +81,42 @@ class GOESVector (object) :
     @property
     def size(self) : 
         return self.vector.size
+
+    @property
+    def window_size(self):
+        return int((self.size -1)/len(self.CHANNELS))
+
+    @property
+    def window_edge(self) : 
+        return int(np.sqrt(self.window_size))
+
+
+    @property
+    def normal_vector(self) : 
+        """Normalizes the vector to the valid range of 
+        allowed values on a per-channel basis."""
+        normal = np.array(self.vector)
+        v_size = self.window_size
+        for i in range(len(self.VALID_RANGES)) : 
+            normal[i*v_size:(i+1)*v_size] = normalize(
+                     self.vector[i*v_size:(i+1)*v_size], 
+                     self.VALID_RANGES[i])
+        return normal
+
+    @property
+    def windows(self) : 
+        """Reconstruct the "windows" of data"""
+        w_data = self.vector[:-1]
+        w_edge = self.window_edge
+        return w_data.reshape( (len(self.CHANNELS),w_edge,w_edge) )
+
+    @property
+    def normal_windows(self) : 
+        """Reconstruct the "windows" of data"""
+        w_data = self.normal_vector[:-1]
+        w_edge = self.window_edge
+        return w_data.reshape( (len(self.CHANNELS),w_edge,w_edge) )
+
 
     @classmethod
     def from_window(cls, scene, center, output, edge=7) : 
@@ -97,7 +143,7 @@ class GOESVector (object) :
 
         t = scene.geo.t_start
 
-        return cls( vector, output, center, t ) 
+        return cls( vector, output, center, t, windows ) 
         
     @classmethod
     def from_scene(cls, fname, scene_obs, output) : 

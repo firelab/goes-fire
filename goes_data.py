@@ -201,10 +201,86 @@ class CMIScene(ABIScene) :
         ds = nc.Dataset(fname)
         return cls.read_dataset(ds, channels, pc)
 
+class FireMeasurement(Feature) : 
+    """Represents the characteristics of a fire which have physical units:
+       temperature, area, power."""
+
+    ATTRIBUTE_PREFIX =  { 'Power' : 'fire_radiative_power',
+                          'Area'  : 'fire_area',
+                          'Temp'  : 'fire_temperature' }
+
+    def __init__(self, ds, name) : 
+        self.data = ds.variables[name]
+        self.ds   = ds
+        self.name = name
+
+        long_name = self.ATTRIBUTE_PREFIX[name]
+
+        self.outliers = ds.variables['{}_outlier_pixel_count'.format(long_name)]
+        self.min      = ds.variables['minimum_{}'.format(long_name)]
+        self.max      = ds.variables['maximum_{}'.format(long_name)]
+        self.mean     = ds.variables['mean_{}'.format(long_name)]
+        self.stdev    = ds.variables['standard_deviation_{}'.format(long_name)]
+        
+class CategoricalFeature(Feature) : 
+    """Represents items which convey information but which are not 
+       meansurements of physical quantities."""
+
+    def __init__(self, ds, name)  :
+        self.data = ds.variables[name]
+        self.ds   = ds
+        self.name = name
+
+
 class FireScene (ABIScene) : 
     """A GOES-R fire product primarily consists of mask, temperature,
-       area, and radiative power arrays."""
-    pass
+       area, radiative power, and data quality arrays."""
+    def __init__(self, geo, channel_dict)  :
+
+        super().__init__(geo, channel_dict)
+        self._fire_mask = None
+
+   
+    @classmethod
+    def read_dataset(cls, ds, pc=None) : 
+        geo = ABIData.read_L2_dataset(ds)
+
+        if pc is not None : 
+            geo.centers = pc
+
+        vars  = ds.variables
+
+        channel_dict =  {} 
+        for ch in ('Temp', 'Power', 'Area') : 
+            if ch in vars :  
+                channel_dict[ch] = FireMeasurement(ds, ch)
+
+        for ch in ('Mask', 'DQF') : 
+            if ch in vars : 
+                channel_dict[ch] = CategoricalFeature(ds, ch)
+            
+        return cls(geo, channel_dict)
+
+
+    @classmethod
+    def read_ncfile(cls, fname, pc=None) : 
+        ds = nc.Dataset(fname)
+        return cls.read_dataset(ds,pc)
+
+    @property 
+    def fire_mask(self) : 
+        """Return a grid of boolean values which are flagged as fires."""
+        if self._fire_mask is None : 
+            self._fire_mask = self.channels['DQF'].data[:] == 0
+        return self._fire_mask
+
+    @property
+    def fire_indices(self) : 
+        """Return indices into the 2d scene where the pixels are flagged
+        as fires."""
+            
+        return np.where(self.fire_mask)
+
 
 class SceneDate(object) : 
     """can parse or format a timestamp found in various locations

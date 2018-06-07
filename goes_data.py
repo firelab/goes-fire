@@ -8,6 +8,7 @@ import astropy.time as at
 import pandas as pd
 import glob
 import os.path
+import collections as c
 from datetime import datetime
 
 class ABIData (object) : 
@@ -280,6 +281,24 @@ class FireScene (ABIScene) :
         as fires."""
             
         return np.where(self.fire_mask)
+
+    def make_dataframe(self) : 
+        i_fires = self.fire_indices
+
+        lat = self.geo.centers.lat[i_fires]
+        lon = self.geo.centers.lon[i_fires]
+        temp = self.channels['Temp'].data[:][i_fires]
+        power = self.channels['Power'].data[:][i_fires]
+        area  = self.channels['Area'].data[:][i_fires]
+
+        sza = self.geo.get_solar_angles() 
+        solar_zenith = sza.solar_zenith[i_fires]
+        solar_az     = sza.solar_az[i_fires]
+        
+        return pd.DataFrame( c.OrderedDict( [ ('Lat',  lat), ('Lon', lon),
+                               ('Temp', temp), ('Power', power), ('Area', area), 
+                               ('Solar_Zenith', solar_zenith), ('Solar_Azimuth', solar_az) ] )  )
+        
 
 
 class SceneDate(object) : 

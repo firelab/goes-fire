@@ -224,7 +224,7 @@ class FireMeasurement(Feature) :
         
 class CategoricalFeature(Feature) : 
     """Represents items which convey information but which are not 
-       meansurements of physical quantities."""
+       measurements of physical quantities."""
 
     def __init__(self, ds, name)  :
         self.data = ds.variables[name]

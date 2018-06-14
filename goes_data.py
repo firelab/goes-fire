@@ -70,9 +70,14 @@ class ABIData (object) :
         proj = gp.Projection.read_dataset(ds)
         j2000 = at.Time('2000-01-01T12:00:00Z', format='isot', scale='utc')
         t = j2000 + ds.variables['t'][:] * u.s
-        bounds = ds.variables['time_bounds'][:] * u.s
-        start_time = j2000 + bounds[0] 
-        end_time   = j2000 + bounds[1]
+        bounds = ds.variables['time_bounds'][:] 
+        if bounds[0] is not  ma.masked : 
+            bounds = bounds*u.s
+            start_time = j2000 + bounds[0] 
+            end_time   = j2000 + bounds[1]
+        else: 
+            start_time = None
+            end_time = None
         return cls(x, y, proj, t, scene, platform, start_time, end_time)
 
     @classmethod
@@ -299,6 +304,34 @@ class FireScene (ABIScene) :
                                ('Temp', temp), ('Power', power), ('Area', area), 
                                ('Solar_Zenith', solar_zenith), ('Solar_Azimuth', solar_az) ] )  )
         
+
+    @classmethod
+    def ncfiles_to_csv(cls, files, times=None, csvfile=None) : 
+        cumulative = None
+        pc = None
+        for i in range(len(files)) : 
+            f = files[i]
+            
+            current = cls.read_ncfile(f,pc)
+            if times is not None : 
+                current.geo.t = at.Time(times[i], scale='utc')
+
+            cur_df = current.make_dataframe() 
+            ts = current.geo.t.iso
+            cur_df['Timestamp'] = [ts] * len(cur_df['Lat'])
+
+            if pc is None : 
+                pc = current.geo.centers
+
+            if cumulative is None : 
+                cumulative = cur_df
+            else :
+                cumulative = cumulative.append(cur_df)
+
+            print('[{}] {}'.format( len(cumulative['Timestamp']), current.geo.t.iso))
+            
+        if csvfile is not None : 
+            cumulative.to_csv(csvfile)
 
 
 class SceneDate(object) : 

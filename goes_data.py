@@ -54,6 +54,9 @@ class ABIData (object) :
            np.all( self.y == centers.y )) : 
            self.__centers = centers
 
+    def get_solar_angles_by_index(self, indices) : 
+        return gp.SolarAngles(self.centers, self.t, indices) 
+
     def get_solar_angles(self) : 
         if self._sza is None : 
             pc = self.centers
@@ -296,9 +299,9 @@ class FireScene (ABIScene) :
         power = self.channels['Power'].data[:][i_fires]
         area  = self.channels['Area'].data[:][i_fires]
 
-        sza = self.geo.get_solar_angles() 
-        solar_zenith = sza.solar_zenith[i_fires]
-        solar_az     = sza.solar_az[i_fires]
+        sza = self.geo.get_solar_angles_by_index(i_fires) 
+        solar_zenith = sza.solar_zenith
+        solar_az     = sza.solar_az
         
         return pd.DataFrame( c.OrderedDict( [ ('Lat',  lat), ('Lon', lon),
                                ('Temp', temp), ('Power', power), ('Area', area), 

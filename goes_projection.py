@@ -260,21 +260,35 @@ class SolarAngles(object) :
     """A class which computes solar angles for every pixel in the scene
     at a specified time. Also capable of producing masks based on 
     thresholds of zenith angle or sunglint angle"""
-    def __init__(self, centers, time) : 
+    def __init__(self, centers, time, indices=None) : 
         self.centers = centers
         self.time    = time
+        self.indices = indices
 
+        # figure out where the sun is
         self.solar_coord = ac.get_sun(time)
+
+        # subset by the provided indices, if specified
+        if indices is None : 
+            lats = centers.lat
+            lons = centers.lon
+        else: 
+            lats = centers.lat[indices]
+            lons = centers.lon[indices]
 
         # calculate the solar zenith angle at each pixel center. 
         # neglect refraction and height above geoid.
-        pixels = ac.EarthLocation(lat=centers.lat, lon=centers.lon, ellipsoid='GRS80')
+        pixels = ac.EarthLocation(lons, lats, ellipsoid='GRS80')
         solar_vecs = self.solar_coord.transform_to(ac.AltAz(obstime=time,location=pixels))
 
-        mask = ma.getmask(centers.lon)
-        self.solar_zenith = ma.array(solar_vecs.zen.to_value(u.deg), 
-                                     mask=mask ) 
-        self.solar_az = ma.array(solar_vecs.az.to_value(u.deg), mask=mask)
+        # mask out the non earth pixels, unless the user specified which pixels to calculate
+        if indices is None : 
+            mask = ma.getmask(centers.lon)
+        else: 
+            mask = None
+
+        self.solar_zenith = ma.array(solar_vecs.zen.to_value(u.deg), mask=mask ) 
+        self.solar_az     = ma.array(solar_vecs.az.to_value(u.deg),  mask=mask )
 
     def get_glint_az(self) : 
         glint_az = self.solar_az + 180

@@ -248,6 +248,8 @@ class FireScene (ABIScene) :
 
         super().__init__(geo, channel_dict)
         self._fire_mask = None
+        self._count = None
+        self._has_fires = None
 
    
     @classmethod
@@ -283,12 +285,24 @@ class FireScene (ABIScene) :
             self._fire_mask = self.channels['DQF'].data[:] == 0
         return self._fire_mask
 
+    @property 
+    def count(self) : 
+        if self._count is None : 
+            self._count = len(self.fire_indices[0])
+        return self._count
+
     @property
     def fire_indices(self) : 
         """Return indices into the 2d scene where the pixels are flagged
         as fires."""
             
         return np.where(self.fire_mask)
+
+    @property
+    def has_fires(self) : 
+        if self._has_fires is None : 
+            self._has_fires = self.count > 0 
+        return self._has_fires
 
     def make_dataframe(self) : 
         i_fires = self.fire_indices
@@ -323,18 +337,20 @@ class FireScene (ABIScene) :
                 current.geo.t = at.Time(times[i], scale='utc')
 
             # Make a data frame out of the current netCDF file.
-            cur_df = current.make_dataframe() 
-            ts = current.geo.t.iso
-            cur_df['Timestamp'] = [ts] * len(cur_df['Lat'])
+            # (but only if that scene has fires...)
+            if current.has_fires : 
+                cur_df = current.make_dataframe() 
+                ts = current.geo.t.iso
+                cur_df['Timestamp'] = [ts] * len(cur_df['Lat'])
+
+                # accumulate the CSV in the file by appending each time through the loop.
+                cur_df.to_csv(csvfile, mode=mode, header=headers)
+                mode = 'a'
+                headers = False
 
             # re-use previous computation of pixel centers
             if pc is None : 
                 pc = current.geo.centers
-
-            # accumulate the CSV in the file by appending each time through the loop.
-            cur_df.to_csv(csvfile, mode=mode, header=headers)
-            mode = 'a'
-            headers = False
 
             # print something just so we know we're alive.
             cumulative = cumulative + len(cur_df['Timestamp'])

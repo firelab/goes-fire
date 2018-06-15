@@ -306,32 +306,37 @@ class FireScene (ABIScene) :
         
 
     @classmethod
-    def ncfiles_to_csv(cls, files, times=None, csvfile=None) : 
-        cumulative = None
+    def ncfiles_to_csv(cls, files, csvfile, times=None) : 
+        cumulative = 0
         pc = None
+        mode = 'w'
+        headers = True
         for i in range(len(files)) : 
             f = files[i]
             
+            # read in the next file off of the list.
             current = cls.read_ncfile(f,pc)
             if times is not None : 
                 current.geo.t = at.Time(times[i], scale='utc')
 
+            # Make a data frame out of the current netCDF file.
             cur_df = current.make_dataframe() 
             ts = current.geo.t.iso
             cur_df['Timestamp'] = [ts] * len(cur_df['Lat'])
 
+            # re-use previous computation of pixel centers
             if pc is None : 
                 pc = current.geo.centers
 
-            if cumulative is None : 
-                cumulative = cur_df
-            else :
-                cumulative = cumulative.append(cur_df)
+            # accumulate the CSV in the file by appending each time through the loop.
+            cur_df.to_csv(csvfile, mode=mode, header=headers)
+            mode = 'a'
+            headers = False
 
-            print('[{}] {}'.format( len(cumulative['Timestamp']), current.geo.t.iso))
+            # print something just so we know we're alive.
+            cumulative = cumulative + len(cur_df['Timestamp'])
+            print('[{}] {}% {}'.format(cumulative,  100.0*i/len(files), current.geo.t.iso))
             
-        if csvfile is not None : 
-            cumulative.to_csv(csvfile)
 
 
 class SceneDate(object) : 

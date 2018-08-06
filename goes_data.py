@@ -244,9 +244,10 @@ class CategoricalFeature(Feature) :
 class FireScene (ABIScene) : 
     """A GOES-R fire product primarily consists of mask, temperature,
        area, radiative power, and data quality arrays."""
-    def __init__(self, geo, channel_dict)  :
+    def __init__(self, ds, geo, channel_dict)  :
 
         super().__init__(geo, channel_dict)
+        self._ds = ds
         self._fire_mask = None
         self._count = None
         self._has_fires = None
@@ -270,7 +271,7 @@ class FireScene (ABIScene) :
             if ch in vars : 
                 channel_dict[ch] = CategoricalFeature(ds, ch)
             
-        return cls(geo, channel_dict)
+        return cls(ds, geo, channel_dict)
 
 
     @classmethod
@@ -304,9 +305,14 @@ class FireScene (ABIScene) :
             self._has_fires = self.count > 0 
         return self._has_fires
 
+    def close(self) : 
+        self._ds.close()
+
     def make_dataframe(self) : 
         i_fires = self.fire_indices
 
+        pix_i = i_fires[1]
+        pix_j = i_fires[0]
         lat = self.geo.centers.lat[i_fires]
         lon = self.geo.centers.lon[i_fires]
         temp = self.channels['Temp'].data[:][i_fires]
@@ -317,7 +323,7 @@ class FireScene (ABIScene) :
         solar_zenith = sza.solar_zenith
         solar_az     = sza.solar_az
         
-        return pd.DataFrame( c.OrderedDict( [ ('Lat',  lat), ('Lon', lon),
+        return pd.DataFrame( c.OrderedDict( [ ('i',pix_i), ('j',pix_j), ('Lat',  lat), ('Lon', lon),
                                ('Temp', temp), ('Power', power), ('Area', area), 
                                ('Solar_Zenith', solar_zenith), ('Solar_Azimuth', solar_az) ] )  )
         
@@ -351,6 +357,9 @@ class FireScene (ABIScene) :
             # re-use previous computation of pixel centers
             if pc is None : 
                 pc = current.geo.centers
+
+            # close up the netCDF file
+            current.close()
 
             # print something just so we know we're alive.
             cumulative = cumulative + len(cur_df['Timestamp'])

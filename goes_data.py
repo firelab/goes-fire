@@ -251,6 +251,8 @@ class FireScene (ABIScene) :
         self._fire_mask = None
         self._count = None
         self._has_fires = None
+        self._error_count = None
+        self._error_code = None
 
    
     @classmethod
@@ -285,6 +287,25 @@ class FireScene (ABIScene) :
         if self._fire_mask is None : 
             self._fire_mask = self.channels['DQF'].data[:] == 0
         return self._fire_mask
+
+    def error_count(self, code=None, window=None) : 
+        """Returns a count of pixels which had some sort of error in processing.
+           Specifically, the data quality flag is 3, 4, or 5.
+           3: invalid_due_to_surface_type_or_sunglint_or_LZA_threshold_exceeded_or_off_earth_or_missing_input_data_qf
+           4: invalid_due_to_bad_input_data_qf
+           5: invalid_due_to_algorithm_failure_qf"""
+        if self._error_count is None  or (self._error_code is not None and code != self._error_code) : 
+            self._error_code = code
+            if window is None : 
+                window = slice(None, None, None) 
+            if code is None : 
+                error_mask = self.channels['DQF'].data[window] >= 3
+            else:  
+                error_mask = self.channels['DQF'].data[window] == code
+            self._error_count = np.count_nonzero(error_mask)
+        return self._error_count
+         
+        
 
     @property 
     def count(self) : 
